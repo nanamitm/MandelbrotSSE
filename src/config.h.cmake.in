@@ -1,0 +1,15 @@
+/* src/config.h - generated from config.h.cmake.in by CMake */
+
+#ifndef __CONFIG_H_CMAKE__
+#define __CONFIG_H_CMAKE__
+
+/* Full name and version of this package. */
+#define PACKAGE_NAME    "@PROJECT_NAME@"
+#define PACKAGE_VERSION "@PROJECT_VERSION@"
+#define PACKAGE_STRING  "@PROJECT_NAME@ @PROJECT_VERSION@"
+#define VERSION         "@PROJECT_VERSION@"
+
+/* Define this to use OpenMP. */
+#cmakedefine USE_OPENMP 1
+
+#endif

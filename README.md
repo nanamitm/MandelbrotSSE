@@ -23,19 +23,36 @@ files. The 'autopilot' one zooms in a specific location, while the other
 one allows you to zoom interactively using your mouse (left-click/hold zooms in,
 right-click/hold zooms out).
 
-For those of you that want to build from source code, there are 
-cross-compilation instructions later in this document.
+If you want to build from source natively on Windows, install
+[MSYS2](https://www.msys2.org/) and, from its MINGW64 shell, run:
+
+    $ pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 \
+                mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+    $ cmake -B build -G Ninja
+    $ cmake --build build
+
+The resulting `build/mandelSSE.exe` needs `SDL2.dll` next to it (or
+`C:\msys64\mingw64\bin` on your `PATH`). Cross-compilation instructions
+from Linux are later in this document.
 
 For Linux/BSD/OSX users
 -----------------------
 
-Make sure you have libSDL2 installed. In Debian and its derivatives,
-like Ubuntu, just `sudo apt install libsdl2-dev`.
+Make sure you have libSDL2 and CMake installed. In Debian and its
+derivatives, like Ubuntu, just
+`sudo apt install libsdl2-dev cmake ninja-build`.
 
 Then, build the code - with...
 
-    $ ./configure
-    $ make
+    $ cmake -B build -G Ninja
+    $ cmake --build build
+
+The binary lands in `build/mandelSSE`.
+
+Note: the core loops use GCC/Clang inline assembly and builtins, so you
+need GCC or Clang (MSVC is not supported). The build defaults to a Release,
+`-O3 -ffast-math` configuration tuned for the build machine's CPU
+(`-mtune=native`); pass `-DENABLE_NATIVE=OFF` to produce a portable binary.
 
 For people that prefer browsers
 -------------------------------
@@ -249,31 +266,24 @@ Have a look!
 
 Cross compiling for Windows via MinGW
 -------------------------------------
-After decompressing the SDL 2.0.22 tarball, install MinGW:
+Install the MinGW toolchain and a MinGW build of SDL2:
 
-    $ sudo apt install gcc-mingw-w64
+    $ sudo apt install gcc-mingw-w64 cmake ninja-build \
+            libsdl2-dev:i386   # or a MinGW SDL2 package for your distro
 
-Then download the source code of libSDL and compile it as follows:
+Then point CMake at the MinGW toolchain with `-DCMAKE_TOOLCHAIN_FILE`
+(or `-DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++` and the matching
+`CMAKE_FIND_ROOT_PATH` for your SDL2 install):
 
-    $ cd SDL-2.0.22
-    $ ./configure --host=x86_64-w64-mingw32 \
-            --disable-video-x11 --disable-x11-shared \
-            --prefix=/usr/local/packages/SDL-2.0.22-win32
-    $ make
-    $ sudo make install
+    $ cmake -B build-win -G Ninja \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_FIND_ROOT_PATH=/path/to/mingw-sdl2 \
+            -DENABLE_NATIVE=OFF
+    $ cmake --build build-win
 
-Finally, come back to this source folder, and configure it like this:
-
-    $ ./configure --host=x86_64-w64-mingw32 \
-            --with-sdl-prefix=/usr/local/packages/SDL-2.0.22-win32 \
-            --disable-sdltest
-    $ make
-    $ cp src/mandelSSE.exe \
-            /usr/local/packages/SDL-2.0.22-win32/bin/SDL2.dll \
-            /some/path/for/Windows/
-
-You can also get the "ingredients" (DLLs for SDL2, OpenMP, libstd++, etc)
-from the packaged release
+Then copy `build-win/mandelSSE.exe` together with `SDL2.dll` (and the
+MinGW runtime DLLs for OpenMP / libstdc++) to your Windows machine.
+You can also get those "ingredients" from the packaged release
 [here](https://github.com/ttsiodras/MandelbrotSSE/releases/download/2.11/mandelSSE-win32-2.11.zip).
 
 MISC

@@ -22,13 +22,17 @@ cross-compilation instructions later in this document.
 For Linux/BSD/OSX users
 -----------------------
 
-Make sure you have libSDL2 installed. In Debian and its derivatives,
-like Ubuntu, just `sudo apt install libsdl2-dev`.
+Make sure you have libSDL2 and CMake installed. In Debian and its
+derivatives, like Ubuntu, just
+`sudo apt install libsdl2-dev cmake ninja-build`.
 
 Then, build the code - with...
 
-    $ ./configure
-    $ make
+    $ cmake -B build -G Ninja
+    $ cmake --build build
+
+The binary lands in build/mandelSSE. You need GCC or Clang (MSVC is not
+supported, since the core loops use GNU inline assembly).
 
 Usage
 -----
@@ -232,30 +236,27 @@ stops zoooming.
 The code has a lot of comments explaining the inner-workings in detail.
 Have a look!
 
-Cross compiling for Windows via MinGW
--------------------------------------
-After decompressing the SDL 2.0.22 tarball, install MinGW:
+Building for Windows
+--------------------
+The easiest way is to build natively on Windows with MSYS2: from its
+MINGW64 shell, install the toolchain and SDL2, then use CMake:
 
-    $ sudo apt install gcc-mingw-w64
+    $ pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 \
+                mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+    $ cmake -B build -G Ninja
+    $ cmake --build build
 
-Then download the source code of libSDL and compile it as follows:
+To cross-compile from Linux instead, install gcc-mingw-w64 plus a MinGW
+build of SDL2, and point CMake at the MinGW compiler:
 
-    $ cd SDL-2.0.22
-    $ ./configure --host=x86_64-w64-mingw32 \
-            --disable-video-x11 --disable-x11-shared \
-            --prefix=/usr/local/packages/SDL-2.0.22-win32
-    $ make
-    $ sudo make install
+    $ cmake -B build-win -G Ninja \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+            -DCMAKE_FIND_ROOT_PATH=/path/to/mingw-sdl2 \
+            -DENABLE_NATIVE=OFF
+    $ cmake --build build-win
 
-Finally, come back to this source folder, and configure it like this:
-
-    $ ./configure --host=x86_64-w64-mingw32 \
-            --with-sdl-prefix=/usr/local/packages/SDL-2.0.22-win32 \
-            --disable-sdltest
-    $ make
-    $ cp src/mandelSSE.exe \
-            /usr/local/packages/SDL-2.0.22-win32/bin/SDL2.dll \
-            /some/path/for/Windows/
+Then copy the resulting mandelSSE.exe together with SDL2.dll (and the
+MinGW runtime DLLs for OpenMP / libstdc++) to your Windows machine.
 
 You can also get the "ingredients" (DLLs for SDL2, OpenMP, libstd++, etc)
 from the packaged release

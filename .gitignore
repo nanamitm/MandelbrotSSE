@@ -13,3 +13,6 @@ src/*.o
 src/*.exe
 src/version.h
 tags
+
+# CMake build directory
+/build/
