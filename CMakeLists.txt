@@ -113,3 +113,18 @@ target_compile_definitions(mandelSSE PRIVATE NDEBUG)
 # Install
 # ---------------------------------------------------------------------------
 install(TARGETS mandelSSE RUNTIME DESTINATION bin)
+
+# ---------------------------------------------------------------------------
+# Tests (ctest)
+# ---------------------------------------------------------------------------
+include(CTest)
+if(BUILD_TESTING)
+    # Differential / throughput test for the SIMD core loops. It links the
+    # core loops from src/sse.cc directly (which pulls in SDL.h via common.h,
+    # hence the SDL2 include dirs; no SDL functions are actually called).
+    add_executable(test_coreloop test/test_coreloop.cc src/sse.cc)
+    target_include_directories(test_coreloop PRIVATE "${GENERATED_DIR}" src)
+    target_link_libraries(test_coreloop PRIVATE SDL2::SDL2)
+    target_compile_options(test_coreloop PRIVATE -O2)
+    add_test(NAME coreloop COMMAND test_coreloop)
+endif()
