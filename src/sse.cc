@@ -17,6 +17,11 @@ DECLARE_ALIGNED(16,double,ones[4]) = { 1.0, 1.0, 1.0, 1.0 };
 DECLARE_ALIGNED(16,double,fours[4]) = { 4.0, 4.0, 4.0, 4.0 };
 DECLARE_ALIGNED(32,double,twos[4]) = { 2.0, 2.0, 2.0, 2.0 };
 
+// Single-precision constants for the 8-wide float AVX core loop.
+DECLARE_ALIGNED(32,float,ones_f[8])  = { 1,1,1,1,1,1,1,1 };
+DECLARE_ALIGNED(32,float,fours_f[8]) = { 4,4,4,4,4,4,4,4 };
+DECLARE_ALIGNED(32,float,twos_f[8])  = { 2,2,2,2,2,2,2,2 };
+
 DECLARE_ALIGNED(32,unsigned,allbits[8]) = {0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF};
 
 void CoreLoopDoubleDefault(double xcur, double ycur, double xstep, unsigned char **p)
@@ -363,5 +368,98 @@ void CoreLoopDoubleAVX(double xcur, double ycur, double xstep, unsigned char **p
     *(*p)++ = outputs[1];
     *(*p)++ = outputs[2];
     *(*p)++ = outputs[3];
+}
+
+// Single-precision, 8-pixels-at-a-time AVX core loop. Same structure as
+// CoreLoopDoubleAVX (FMA recurrence + periodicity check), but operates on
+// 8 floats per YMM register instead of 4 doubles. Used only for shallow
+// zooms, where float precision is enough; the renderer falls back to the
+// double version once the per-pixel step gets too small for floats.
+void CoreLoopFloatAVX(double xcur, double ycur, double xstep, unsigned char **p)
+{
+    DECLARE_ALIGNED(32,float,re[8]);
+    DECLARE_ALIGNED(32,float,im[8]);
+    DECLARE_ALIGNED(32,unsigned,outputs[8]);
+
+    for (int k=0; k<8; k++) {
+        re[k] = (float)(xcur + k*xstep);
+        im[k] = (float)ycur;
+    }
+                                               // x' = x^2 - y^2 + a
+                                               // y' = 2xy + b
+    asm("mov    %6,%%ecx\n\t"                  //  ecx is iterations
+        "xor    %%ebx, %%ebx\n\t"              //  period = 0
+	"vmovaps %3,%%ymm5\n\t"                //  4.    (x8)                   ; ymm5
+	"vmovaps %1,%%ymm6\n\t"                //  a     (x8)                   ; ymm6
+	"vmovaps %2,%%ymm7\n\t"                //  b     (x8)                   ; ymm7
+	"vmovaps %4,%%ymm11\n\t"               //  1.    (x8)                   ; ymm11
+	"vmovaps %5,%%ymm12\n\t"               //  allbits                      ; ymm12
+	"vmovaps %7,%%ymm13\n\t"               //  2.    (x8)                   ; ymm13 (for FMA y'=2xy+b)
+	"vxorps  %%ymm0,%%ymm0,%%ymm0\n\t"     //  0.    (x8)                   ; rez in ymm0
+	"vxorps  %%ymm1,%%ymm1,%%ymm1\n\t"     //  0.    (x8)                   ; imz in ymm1
+	"vxorps  %%ymm3,%%ymm3,%%ymm3\n\t"     //  0.    (x8)                   ; bailout counters
+	"vxorps  %%ymm8,%%ymm8,%%ymm8\n\t"     //  0.    (x8)                   ; periodicity check for x
+	"vxorps  %%ymm9,%%ymm9,%%ymm9\n\t"     //  0.    (x8)                   ; periodicity check for y
+
+	"1:\n\t"                               //  Main Mandelbrot computation loop (label: 1)
+                                               //  x in ymm0, y in ymm1 on entry
+	//  --- magnitude for the bailout test (independent of the recurrence) ---
+	"vmulps  %%ymm0,%%ymm0,%%ymm14\n\t"    //  x^2                              ; ymm14
+	"vmulps  %%ymm1,%%ymm1,%%ymm15\n\t"    //  y^2                              ; ymm15
+	"vaddps  %%ymm15,%%ymm14,%%ymm4\n\t"   //  x^2+y^2 (magnitude)              ; ymm4
+	//  --- recurrence via FMA (shorter critical path: 2 fused ops) ---
+	"vmulps  %%ymm1,%%ymm0,%%ymm2\n\t"     //  x*y                              ; ymm2
+	"vmovaps %%ymm6,%%ymm15\n\t"           //  a                                ; ymm15
+	"vfmadd231ps %%ymm0,%%ymm0,%%ymm15\n\t"//  a + x*x                          ; ymm15
+	"vfnmadd231ps %%ymm1,%%ymm1,%%ymm15\n\t"// (a + x*x) - y*y = x' (last use of y); ymm15
+	"vmovaps %%ymm7,%%ymm1\n\t"            //  b                                ; ymm1
+	"vfmadd231ps %%ymm13,%%ymm2,%%ymm1\n\t"//  b + 2*(x*y) = y'                 ; ymm1
+	"vmovaps %%ymm15,%%ymm0\n\t"           //  x'                               ; ymm0
+
+	"vcmpltps %%ymm5,%%ymm4,%%ymm4\n\t"    //  <4 ? (x8)                        ; ymm4
+	"vmovaps %%ymm4,%%ymm2\n\t"            //  ymm2 and ymm4: all 1s in non-overflowed lanes
+	"vmovmskps %%ymm4,%%eax\n\t"           //  lower 8 bits of EAX reflect comparisons with 4.0
+	"vandps  %%ymm11,%%ymm4,%%ymm4\n\t"    //  AND with 1.0 ...
+	"vaddps  %%ymm4,%%ymm3,%%ymm3\n\t"     //  ...update only the non-overflowed counters
+
+	"test   %%eax,%%eax\n\t"               //  have all 8 pixels overflowed ?
+	"je     2f\n\t"                        //  yes -> end the loop
+
+	"dec    %%ecx\n\t"                     //  otherwise repeat up to iterations times...
+	"jnz    22f\n\t"                       //  but first do periodicity checking
+
+                                               //  Looped iterations times: set non-overflowed outputs to 0 (black)
+	"vmovaps %%ymm2,%%ymm4\n\t"            //  ymm4: all 1s in non-overflowed lanes...
+	"vxorps  %%ymm12,%%ymm4,%%ymm4\n\t"    //  ...toggle so all 1s mark overflowed lanes
+	"vandps  %%ymm4,%%ymm3,%%ymm3\n\t"     //  zero the non-overflowed counters (lake -> black)
+	"jmp    2f\n\t"
+
+	"22:\n\t"                              //  Periodicity checking
+        "andl $0xF, %%ebx\n\t"                 //  period &= 0xF
+        "jnz 11f\n\t"                          //  if period != 0, check whether we see xolds/yolds again
+        "inc %%ebx\n\t"                        //  period++
+        "vmovaps %%ymm0, %%ymm8\n\t"           //  store xolds...
+        "vmovaps %%ymm1, %%ymm9\n\t"           //  ...and yolds
+	"jmp    1b\n\t"
+
+        "11:\n\t"                              //  are we seeing xolds/yolds again?
+        "vcmpeqps %%ymm0, %%ymm8,%%ymm10\n\t"  //  compare xolds with rez
+	"vmovmskps %%ymm10,%%eax\n\t"
+        "test %%eax, %%eax\n\t"
+        "jz 1b\n\t"                            //  none matched -> repeat the loop
+        "vcmpeqps %%ymm1, %%ymm9,%%ymm10\n\t"  //  compare yolds with imz
+	"vmovmskps %%ymm10,%%eax\n\t"
+        "test %%eax, %%eax\n\t"
+        "jz 1b\n\t"
+	"vxorps  %%ymm3,%%ymm3,%%ymm3\n\t"     //  repetition detected -> set results to 0 (black)
+	"2:\n\t"
+        "vcvttps2dq %%ymm3, %%ymm0\n\t"        //  Convert 8 floats into 8 ints.
+	"vmovaps %%ymm0,%0\n\t"
+	:"=m"(outputs[0])
+	:"m"(re[0]),"m"(im[0]),"m"(fours_f[0]),"m"(ones_f[0]),"m"(allbits[0]),"m"(iterations),"m"(twos_f[0])
+	:"%eax","%ebx","%ecx","%ymm0","%ymm1","%ymm2","%ymm3","%ymm4","%ymm5","%ymm6","%ymm7","%ymm8","%ymm9","%ymm10","%xmm0","%ymm11","%ymm12","%ymm13","%ymm14","%ymm15","memory");
+
+    for (int k=0; k<8; k++)
+        *(*p)++ = outputs[k];
 }
 #endif

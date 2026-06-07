@@ -39,6 +39,11 @@ GLOBAL Uint32 paletteLUT[256];
 // Function pointer, dispatching to AVX/non-AVX code.
 GLOBAL void (*CoreLoopDouble)(double xcur, double ycur, double xstep, unsigned char **p);
 
+// Optional single-precision core loop (8 pixels at a time), used for shallow
+// zooms where float precision is enough. NULL if unavailable (only the AVX
+// build provides one); the renderer then always uses CoreLoopDouble.
+GLOBAL void (*CoreLoopFloat)(double xcur, double ycur, double xstep, unsigned char **p);
+
 // Print message and exit
 void panic(const char *fmt, ...);
 

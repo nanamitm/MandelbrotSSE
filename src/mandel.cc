@@ -164,13 +164,18 @@ int main(int argc, char *argv[])
             (__builtin_cpu_supports("avx") && __builtin_cpu_supports("fma")) ?  CoreLoopDoubleAVX
             : __builtin_cpu_supports("sse") ?  CoreLoopDoubleSSE
             : CoreLoopDoubleDefault;
-    printf("[-] Mode:       %s\n", 
-        CoreLoopDouble == CoreLoopDoubleAVX ? "AVX" 
-        : CoreLoopDouble == CoreLoopDoubleSSE ? "SSE" 
+    // The single-precision fast path exists only for AVX (it also uses FMA3).
+    // Enabled whenever the double core loop is the AVX one.
+    CoreLoopFloat =
+        (CoreLoopDouble == CoreLoopDoubleAVX) ? CoreLoopFloatAVX : NULL;
+    printf("[-] Mode:       %s\n",
+        CoreLoopDouble == CoreLoopDoubleAVX ? "AVX"
+        : CoreLoopDouble == CoreLoopDoubleSSE ? "SSE"
         : "non-AVX/non-SSE");
     printf("[-] Iterations: %d\n", iterations);
 #else
     CoreLoopDouble = CoreLoopDoubleDefault;
+    CoreLoopFloat = NULL;
     printf("[-] Mode: %s\n", "non-AVX/non-SSE");
 #endif
 

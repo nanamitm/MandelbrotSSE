@@ -8,6 +8,12 @@
 // Beyond this, things get shaky...
 #define ZOOM_LIMIT 1e295*MAXX*DBL_MIN
 
+// Single precision (~7 significant digits) is good enough while the
+// per-pixel step on the complex plane stays above this; below it we switch
+// to the double-precision core loop. Conservative, with plenty of margin
+// over the float resolution (~1e-7) near coordinates of magnitude ~2.
+#define FLOAT_STEP_LIMIT 1e-5
+
 // Structure used to sort the coordinate distances from the previous frame.
 // Keep reading further below to understand how this is used.
 typedef struct tagPoint {
@@ -202,6 +208,13 @@ void mandel(
         }
     }
 
+    // For shallow zooms, single precision is accurate enough; use the
+    // 8-wide float core loop (twice the pixels per call) when it is
+    // available and the window width divides into groups of 8. Once the
+    // per-pixel step gets too small for floats, fall back to doubles.
+    bool useFloat = CoreLoopFloat && (MAXX % 8 == 0) &&
+                    (xstep > FLOAT_STEP_LIMIT);
+
     // Armed now with the xlookup and ylookup, we can render the frame.
 #pragma omp parallel for private(xcur, j) schedule(dynamic,1)
     for (int i=0; i<MAXY; i++) {
@@ -213,26 +226,43 @@ void mandel(
         int yclose = ylookup[i];
         // Start moving from xld to xru, one xstep at a time
         xcur = xld;
-        for (j=0; j<MAXX; j+=4) {
-            // if both the xlookup and ylookup indicate that we can
-            // lookup a pixel from the old frame...
-            int xclose  = xlookup[j];
-            int xclose2 = xlookup[j+1];
-            int xclose3 = xlookup[j+2];
-            int xclose4 = xlookup[j+3];
-            if (xclose  != -1 && xclose2 != -1 &&
-                xclose3 != -1 && xclose4 != -1 && yclose != -1)
-            {
-                // ...then just re-use it!
-                *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose];
-                *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose2];
-                *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose3];
-                *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose4];
-            } else {
-                // Otherwise, perform a full computation.
-                CoreLoopDouble(xcur, ycur, xstep, &p);
+        if (useFloat) {
+            // 8 pixels per group (single precision).
+            for (j=0; j<MAXX; j+=8) {
+                bool reuse = (yclose != -1);
+                for (int t=0; t<8 && reuse; t++)
+                    if (xlookup[j+t] == -1) reuse = false;
+                if (reuse) {
+                    for (int t=0; t<8; t++)
+                        *p++ = bufferMem[bufIdx^1][yclose*MAXX + xlookup[j+t]];
+                } else {
+                    CoreLoopFloat(xcur, ycur, xstep, &p);
+                }
+                xcur += 8*xstep;
             }
-            xcur += 4*xstep;
+        } else {
+            // 4 pixels per group (double precision).
+            for (j=0; j<MAXX; j+=4) {
+                // if both the xlookup and ylookup indicate that we can
+                // lookup a pixel from the old frame...
+                int xclose  = xlookup[j];
+                int xclose2 = xlookup[j+1];
+                int xclose3 = xlookup[j+2];
+                int xclose4 = xlookup[j+3];
+                if (xclose  != -1 && xclose2 != -1 &&
+                    xclose3 != -1 && xclose4 != -1 && yclose != -1)
+                {
+                    // ...then just re-use it!
+                    *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose];
+                    *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose2];
+                    *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose3];
+                    *p++ = bufferMem[bufIdx^1][yclose*MAXX + xclose4];
+                } else {
+                    // Otherwise, perform a full computation.
+                    CoreLoopDouble(xcur, ycur, xstep, &p);
+                }
+                xcur += 4*xstep;
+            }
         }
     }
     // Translate the 8-bit index buffer straight into the streaming

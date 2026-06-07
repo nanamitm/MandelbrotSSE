@@ -4,5 +4,6 @@
 void CoreLoopDoubleDefault(double xcur, double ycur, double xstep, unsigned char **p);
 void CoreLoopDoubleSSE(double xcur, double ycur, double xstep, unsigned char **p);
 void CoreLoopDoubleAVX(double xcur, double ycur, double xstep, unsigned char **p);
+void CoreLoopFloatAVX(double xcur, double ycur, double xstep, unsigned char **p);
 
 #endif
