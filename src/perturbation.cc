@@ -169,6 +169,20 @@ static void perturbRowsAVX(
 }
 #endif
 
+// Public wrappers for the temporal-reuse deep renderer (see xaos.cc).
+int perturbComputeReference(
+    double cx, double cy, double *refx, double *refy, int maxiter)
+{
+    return computeReferenceOrbit(cx, cy, refx, refy, maxiter);
+}
+
+int perturbPixelDelta(
+    const double *refx, const double *refy, int reflen,
+    double dcx, double dcy, int maxiter)
+{
+    return perturbPixel(refx, refy, reflen, dcx, dcy, maxiter);
+}
+
 void mandelPerturbation(
     double cx, double cy, double width, double height,
     unsigned char *buf, int W, int H, int maxiter)

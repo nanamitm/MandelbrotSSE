@@ -408,12 +408,139 @@ double mousedriven(double percent)
     return ((double)frames)*1000.0/ticks;
 }
 
+// Deep-zoom renderer with XaoS-style temporal reuse, in the delta-c domain.
+// Identical coordinate-matching to mandel(), except the "coordinates" are
+// offsets from the frame center (so they stay representable in double no
+// matter how deep we are), and pixels that must be recomputed go through the
+// perturbation algorithm rather than CoreLoopDouble. The center is constant
+// while zooming, so matching deltas across frames is equivalent to matching
+// absolute coordinates. On a location change the deltas no longer match and
+// every pixel is recomputed automatically (self-healing full redraw).
+static void deepMandel(
+    double cx, double cy, double width, double height,
+    double percentageOfPixelsToRedraw)
+{
+    int i, j;
+    double xstep, ystep, xcur, ycur;
+
+    static int bufIdx = 0;
+    static double *xcoords[2] = {NULL, NULL}, *ycoords[2] = {NULL, NULL};
+    static int *xlookup, *ylookup;
+    static Uint8 *bufferMem[2];
+    static Point *points;
+    static double *drefx = NULL, *drefy = NULL;   // reference orbit
+
+    int bFirstFrameEver = !xcoords[0];
+    if (bFirstFrameEver) {
+        for (i=0; i<2; i++) {
+            xcoords[i] = new double[MAXX];
+            ycoords[i] = new double[MAXY];
+            bufferMem[i] = new Uint8[MAXX*MAXY];
+            if (!xcoords[i] || !ycoords[i] || !bufferMem[i]) panic("Out of memory");
+            memset(xcoords[i], 0, MAXX*sizeof(double));
+            memset(ycoords[i], 0, MAXY*sizeof(double));
+        }
+        xlookup = new int[MAXX];
+        ylookup = new int[MAXY];
+        points  = new Point[MAXX];
+        drefx   = new double[iterations+1];
+        drefy   = new double[iterations+1];
+        if (!xlookup || !ylookup || !points || !drefx || !drefy)
+            panic("Out of memory");
+    }
+
+    bufIdx ^= 1;
+
+    // Delta-c bounds: symmetric around the center (delta = 0).
+    double xld = -0.5*width, xru = 0.5*width;
+    double yld = -0.5*height, yru = 0.5*height;
+    xstep = (xru - xld)/MAXX;
+    ystep = (yru - yld)/MAXY;
+
+    // --- X coordinate matching against the previous frame (see mandel()) ---
+    xcur = xld;
+    for (i=0; i<MAXX; i++) {
+        int idx_best = -1;
+        double diff = 1e10;
+        xcoords[bufIdx][i] = xcur;
+        for (j=i-30; j<i+30; j++) {
+            if (j<0 || j>MAXX-1) continue;
+            double ndiff = fabs(xcur - xcoords[bufIdx^1][j]);
+            if (ndiff < diff) { diff = ndiff; idx_best = j; }
+        }
+        points[i].distance = diff;
+        points[i].idx_best = idx_best;
+        points[i].idx_original = i;
+        xcur += xstep;
+    }
+    qsort(points, MAXX, sizeof(Point), compare_points);
+    for (i=0; i<MAXX; i++) {
+        int orig_idx = points[i].idx_original;
+        int idx_best = points[i].idx_best;
+        if (bFirstFrameEver || (i < MAXX*percentageOfPixelsToRedraw/100))
+            xlookup[orig_idx] = -1;
+        else {
+            xlookup[orig_idx] = idx_best;
+            xcoords[bufIdx][orig_idx] = xcoords[bufIdx^1][idx_best];
+        }
+    }
+
+    // --- Y coordinate matching ---
+    ycur = yru;
+    for (i=0; i<MAXY; i++) {
+        int idx_best = -1;
+        double diff = 1e10;
+        ycoords[bufIdx][i] = ycur;
+        for (j=i-30; j<i+30; j++) {
+            if (j<0 || j>MAXY-1) continue;
+            double ndiff = fabs(ycur - ycoords[bufIdx^1][j]);
+            if (ndiff < diff) { diff = ndiff; idx_best = j; }
+        }
+        points[i].distance = diff;
+        points[i].idx_best = idx_best;
+        points[i].idx_original = i;
+        ycur -= ystep;
+    }
+    qsort(points, MAXY, sizeof(Point), compare_points);
+    for (i=0; i<MAXY; i++) {
+        int orig_idx = points[i].idx_original;
+        int idx_best = points[i].idx_best;
+        if (bFirstFrameEver || (i < MAXY*percentageOfPixelsToRedraw/100))
+            ylookup[orig_idx] = -1;
+        else {
+            ylookup[orig_idx] = idx_best;
+            ycoords[bufIdx][orig_idx] = ycoords[bufIdx^1][idx_best];
+        }
+    }
+
+    // The reference orbit (shared by every recomputed pixel) - computed once.
+    int reflen = perturbComputeReference(cx, cy, drefx, drefy, iterations);
+
+    // --- Render: reuse from the previous frame where possible, else perturb ---
+#pragma omp parallel for schedule(dynamic,1)
+    for (int row=0; row<MAXY; row++) {
+        unsigned char *p = &bufferMem[bufIdx][row*MAXX];
+        int yclose = ylookup[row];
+        double dcy = ycoords[bufIdx][row];
+        for (int col=0; col<MAXX; col++) {
+            int xclose = xlookup[col];
+            if (xclose != -1 && yclose != -1)
+                p[col] = bufferMem[bufIdx^1][yclose*MAXX + xclose];
+            else
+                p[col] = (unsigned char)perturbPixelDelta(
+                    drefx, drefy, reflen, xcoords[bufIdx][col], dcy, iterations);
+        }
+    }
+
+    presentIndexBuffer(bufferMem[bufIdx]);
+}
+
 // Deep-zoom autopilot. Unlike the normal autopilot (which stops at ZOOM_LIMIT,
-// where double precision runs out), this keeps going far deeper by rendering
-// each frame with the perturbation algorithm. The window is tracked as a
-// center plus a (shrinking) width, never as xld/xru, so it never suffers the
-// catastrophic cancellation that breaks the double-precision path.
-double deepAutopilot(bool benchmark)
+// where double precision runs out), this keeps going far deeper. Each frame is
+// rendered by deepMandel (perturbation + XaoS temporal reuse). The window is
+// tracked as a center plus a (shrinking) width, never as xld/xru, so it never
+// suffers the catastrophic cancellation that breaks the double path.
+double deepAutopilot(double percent, bool benchmark)
 {
     // Well-known points with rich, deep structure. Double precision is enough
     // to *name* the point; we then zoom into that exact point far past where
@@ -427,9 +554,6 @@ double deepAutopilot(bool benchmark)
     const int N = sizeof(deep_points)/sizeof(deep_points[0]);
     int idx = benchmark ? 0 : (rand() % N);
 
-    Uint8 *buf = new Uint8[MAXX*MAXY];
-    if (!buf) panic("Out of memory");
-
     const double aspect = (double)MAXY / MAXX;
     const double DEEP_LIMIT = 1e-22;   // far beyond the ~1e-13 double-precision wall
 
@@ -440,8 +564,7 @@ double deepAutopilot(bool benchmark)
 
     while (1) {
         unsigned st = SDL_GetTicks();
-        mandelPerturbation(cx, cy, width, width*aspect, buf, MAXX, MAXY, iterations);
-        presentIndexBuffer(buf);
+        deepMandel(cx, cy, width, width*aspect, percent);
         unsigned en = SDL_GetTicks();
         ticks += en - st;
         frames++;
@@ -465,8 +588,71 @@ double deepAutopilot(bool benchmark)
         }
     }
 
-    delete[] buf;
     printf("[-] Rendered  : %d frames\n", frames);
     return ticks ? ((double)frames)*1000.0/ticks : 0.0;
+}
+
+// Interactive deep zoom (perturbation). Like mousedriven, but tracks a center
+// plus width (so it zooms far past the double limit) and renders via deepMandel.
+// When idle it draws one full-quality frame and holds it - handy for grabbing a
+// screenshot of a deep location. Left click/hold zooms in toward the cursor,
+// right click/hold zooms out.
+double deepMousedriven(double percent)
+{
+    int x, y;
+    const double aspect = (double)MAXY / MAXX;
+    double cx = -0.5, cy = 0.0;          // start on the whole set
+    double width = 3.0, height = width * aspect;
+    const double DEEP_LIMIT = 1e-22;
+
+    unsigned time_since_we_moved = SDL_GetTicks();
+    bool drawn_full = false, moved = false;
+    int frames = 0;
+    unsigned long ticks = 0;
+
+    while (1) {
+        if (!moved && (SDL_GetTicks() - time_since_we_moved > 200)) {
+            if (!drawn_full) {
+                drawn_full = true;
+                deepMandel(cx, cy, width, height, 100.0);  // crisp, no reuse
+                frames++;
+            } else
+                SDL_Delay(minimum_ms_per_frame);
+        } else if (moved) {
+            drawn_full = false;
+            unsigned st = SDL_GetTicks();
+            deepMandel(cx, cy, width, height, percent);
+            unsigned en = SDL_GetTicks();
+            ticks += en - st;
+            frames++;
+            if (en - st < minimum_ms_per_frame)
+                SDL_Delay(minimum_ms_per_frame - en + st);
+            moved = false;
+        }
+
+        int result = kbhit(&x, &y);
+        if (result == SDL_QUIT)
+            break;
+        else if (result == SDL_BUTTON_LEFT || result == SDL_BUTTON_RIGHT) {
+            moved = true;
+            time_since_we_moved = SDL_GetTicks();
+            double ratiox = ((double)x) / window_width;
+            double ratioy = ((double)y) / window_height;
+            double direction = result == SDL_BUTTON_LEFT ? 1. : -1.;
+            if (result == SDL_BUTTON_LEFT && width < DEEP_LIMIT)
+                continue;
+            // pan toward the cursor while zooming
+            cx += direction * 0.03 * (ratiox - 0.5) * width;
+            cy += direction * 0.03 * (0.5 - ratioy) * height;
+            width  *= (1.0 - direction * 0.03);
+            height  = width * aspect;
+        } else if (result == SDL_WINDOWEVENT) {
+            moved = true;
+            time_since_we_moved = SDL_GetTicks();
+            SDL_GetWindowSize(window, &window_width, &window_height);
+        }
+    }
+    printf("[-] Rendered  : %d frames\n", frames);
+    return frames ? ((double)frames)*1000.0/ (ticks?ticks:1) : 0.0;
 }
 

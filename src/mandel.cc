@@ -62,6 +62,7 @@ int main(int argc, char *argv[])
     bool forceAVX = false, forceSSE = false, forceDefault = false;
 #endif
     double percent = 0.75;
+    bool percentSet = false;
 
     iterations = 2048;
 
@@ -107,6 +108,7 @@ int main(int argc, char *argv[])
                     panic("[x] Invalid percentage: '%s'", optarg);
                 if (0.05 > percent || 100.0 < percent)
                     panic("[x] Invalid percentage: '%s' (0.05 <= percent <= 100.0)", optarg);
+                percentSet = true;
                 break;
             default: /* '?' */
                 usage(argv);
@@ -196,7 +198,16 @@ int main(int argc, char *argv[])
     double fps_reported;
     if (deepZoom) {
         srand(time(NULL));
-        fps_reported = deepAutopilot(benchmark);
+        // The deep renderer's partial redraw makes contours look dotted, and
+        // measurements show reuse buys almost nothing here (the per-frame fixed
+        // cost dominates). So default to a full redraw every frame - crisp, no
+        // dots - unless the user explicitly asks for a lower percentage.
+        double deepPercent = percentSet ? percent : 100.0;
+        if (!autoPilot)
+            // -D -m : interactive deep zoom (idle frames are full quality)
+            fps_reported = deepMousedriven(deepPercent);
+        else
+            fps_reported = deepAutopilot(deepPercent, benchmark);
     } else if (autoPilot) {
         srand(time(NULL));
         fps_reported = autopilot(percent, benchmark);

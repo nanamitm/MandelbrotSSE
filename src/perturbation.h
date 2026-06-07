@@ -26,7 +26,27 @@ void mandelPerturbation(
     unsigned char *buf, int W, int H, int maxiter);
 
 // Deep-zoom autopilot: zoom far past the double-precision limit using the
-// perturbation renderer, presenting each frame. Returns average fps.
-double deepAutopilot(bool benchmark);
+// perturbation renderer, presenting each frame. 'percent' is the fraction of
+// pixels recomputed per frame (higher = crisper contours, slower). Returns
+// average fps.
+double deepAutopilot(double percent, bool benchmark);
+
+// Interactive deep zoom (perturbation). Holds a full-quality frame when idle,
+// so a deep location can be screenshotted. Returns average fps.
+double deepMousedriven(double percent);
+
+// Lower-level helpers, exposed for the temporal-reuse deep renderer.
+//
+// Compute the reference orbit for center (cx,cy) into refx/refy (each at least
+// maxiter+1 doubles). Returns the stored length (Z_0 = (0,0) always).
+int perturbComputeReference(
+    double cx, double cy, double *refx, double *refy, int maxiter);
+
+// Iterate one pixel given its delta-c (dcx,dcy) from the reference center,
+// using a previously computed reference orbit. Returns the escape iteration
+// (0 = inside the set).
+int perturbPixelDelta(
+    const double *refx, const double *refy, int reflen,
+    double dcx, double dcy, int maxiter);
 
 #endif
