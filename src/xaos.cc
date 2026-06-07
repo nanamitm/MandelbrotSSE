@@ -235,19 +235,21 @@ void mandel(
             xcur += 4*xstep;
         }
     }
-    // Copy the memory-based buffer into the SDL one...
-    Uint8 *pixels = (Uint8*)surface->pixels;
-    Uint8 *src = bufferMem[bufIdx];
+    // Translate the 8-bit index buffer straight into the streaming
+    // texture (index -> ARGB8888 via the lookup table), then present.
+    // This reuses one texture instead of allocating one per frame.
+    void *texPixels;
+    int texPitch;
+    SDL_LockTexture(streamTexture, NULL, &texPixels, &texPitch);
     for (int i=0; i<MAXY; i++) {
-        memcpy(pixels, src, MAXX);
-        src += MAXX;
-        pixels += surface->pitch;
+        Uint32 *dst = (Uint32*)((Uint8*)texPixels + i*texPitch);
+        const Uint8 *src = &bufferMem[bufIdx][i*MAXX];
+        for (int j=0; j<MAXX; j++)
+            dst[j] = paletteLUT[src[j]];
     }
-    // ...and blit it on the screen.
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_RenderCopy(renderer, texture, NULL, NULL);
+    SDL_UnlockTexture(streamTexture);
+    SDL_RenderCopy(renderer, streamTexture, NULL, NULL);
     SDL_RenderPresent(renderer);
-    SDL_DestroyTexture(texture);
 }
 
 AUTO_DISPATCH

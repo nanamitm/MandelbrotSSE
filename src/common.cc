@@ -86,7 +86,24 @@ void init256colorsMode(const char *windowTitle)
         palette[0].b = 0;
         palette[0].a = 255;
         SDL_SetPaletteColors(surface->format->palette, palette, 0, 256);
+
+        // Pre-pack the same palette into an ARGB8888 lookup table, so the
+        // per-frame blit is a plain index -> 32-bit pixel translation.
+        for (int value = 0; value < 256; value++)
+            paletteLUT[value] =
+                  (Uint32(palette[value].a) << 24)
+                | (Uint32(palette[value].r) << 16)
+                | (Uint32(palette[value].g) << 8)
+                |  Uint32(palette[value].b);
     }
+
+    // One persistent streaming texture, updated in place every frame
+    // (instead of creating/destroying a texture per frame).
+    streamTexture = SDL_CreateTexture(
+        renderer, SDL_PIXELFORMAT_ARGB8888,
+        SDL_TEXTUREACCESS_STREAMING, MAXX, MAXY);
+    if (!streamTexture)
+        panic("[x] Couldn't create streaming texture: %s\n", SDL_GetError());
 }
 
 // returns SDL_QUIT if ESC is hit or the user closes the window

@@ -30,6 +30,12 @@ GLOBAL SDL_Renderer *renderer;
 GLOBAL SDL_Surface *surface;
 GLOBAL int window_width, window_height;
 
+// Persistent streaming texture (created once) plus a palette lookup table
+// that maps an 8-bit Mandelbrot color index to a packed ARGB8888 pixel.
+// Used to upload each frame without re-creating a texture every time.
+GLOBAL SDL_Texture *streamTexture;
+GLOBAL Uint32 paletteLUT[256];
+
 // Function pointer, dispatching to AVX/non-AVX code.
 GLOBAL void (*CoreLoopDouble)(double xcur, double ycur, double xstep, unsigned char **p);
 
