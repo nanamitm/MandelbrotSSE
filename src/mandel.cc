@@ -158,8 +158,10 @@ int main(int argc, char *argv[])
     else if (forceDefault)
         CoreLoopDouble = CoreLoopDoubleDefault;
     else
-        CoreLoopDouble = 
-            __builtin_cpu_supports("avx") ?  CoreLoopDoubleAVX
+        CoreLoopDouble =
+            // CoreLoopDoubleAVX uses FMA3 instructions, so it needs both
+            // AVX and FMA (Sandy/Ivy Bridge have AVX but no FMA3).
+            (__builtin_cpu_supports("avx") && __builtin_cpu_supports("fma")) ?  CoreLoopDoubleAVX
             : __builtin_cpu_supports("sse") ?  CoreLoopDoubleSSE
             : CoreLoopDoubleDefault;
     printf("[-] Mode:       %s\n", 
