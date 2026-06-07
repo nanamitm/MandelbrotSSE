@@ -73,7 +73,8 @@ add_executable(mandelSSE
     src/mandel.cc
     src/sse.cc
     src/xaos.cc
-    src/common.cc)
+    src/common.cc
+    src/perturbation.cc)
 
 target_include_directories(mandelSSE PRIVATE
     "${GENERATED_DIR}"   # config.h, version.h
@@ -122,7 +123,7 @@ if(BUILD_TESTING)
     # Differential / throughput test for the SIMD core loops. It links the
     # core loops from src/sse.cc directly (which pulls in SDL.h via common.h,
     # hence the SDL2 include dirs; no SDL functions are actually called).
-    add_executable(test_coreloop test/test_coreloop.cc src/sse.cc)
+    add_executable(test_coreloop test/test_coreloop.cc src/sse.cc src/perturbation.cc)
     target_include_directories(test_coreloop PRIVATE "${GENERATED_DIR}" src)
     target_link_libraries(test_coreloop PRIVATE SDL2::SDL2)
     target_compile_options(test_coreloop PRIVATE -O2)

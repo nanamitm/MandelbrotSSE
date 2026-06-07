@@ -18,6 +18,9 @@
 // XaoS algorithm implemenation
 #include "xaos.h"
 
+// Perturbation-based deep zoom
+#include "perturbation.h"
+
 // SSE algorithm implemenation
 #include "sse.h"
 
@@ -36,6 +39,7 @@ void usage(char *argv[])
     puts("\t-m\tRun in mouse-driven mode");
     puts("\t-a\tRun in autopilot mode (default)");
     puts("\t-b\tRun in benchmark mode (implies autopilot)");
+    puts("\t-D\tDeep-zoom autopilot (perturbation; zooms past the double-precision limit)");
 #ifdef __x86_64__
     puts("\t-v\tForce use of AVX");
     puts("\t-s\tForce use of SSE");
@@ -53,7 +57,7 @@ void usage(char *argv[])
 int main(int argc, char *argv[])
 {
     int opt, fps = 60;
-    bool autoPilot = true, benchmark = false;
+    bool autoPilot = true, benchmark = false, deepZoom = false;
 #ifdef __x86_64__
     bool forceAVX = false, forceSSE = false, forceDefault = false;
 #endif
@@ -61,13 +65,16 @@ int main(int argc, char *argv[])
 
     iterations = 2048;
 
-    while ((opt = getopt(argc, argv, "hmabvsdi:p:f:")) != -1) {
+    while ((opt = getopt(argc, argv, "hmabvsdDi:p:f:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(argv);
                 break;
             case 'm':
                 autoPilot = false;
+                break;
+            case 'D':
+                deepZoom = true;
                 break;
             case 'a':
                 autoPilot = true;
@@ -187,7 +194,10 @@ int main(int argc, char *argv[])
     init256colorsMode(windowTitle);
 
     double fps_reported;
-    if (autoPilot) {
+    if (deepZoom) {
+        srand(time(NULL));
+        fps_reported = deepAutopilot(benchmark);
+    } else if (autoPilot) {
         srand(time(NULL));
         fps_reported = autopilot(percent, benchmark);
     } else

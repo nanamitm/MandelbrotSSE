@@ -9,6 +9,22 @@
 int iterations = 2048;   // global read by the core loops
 
 #include "sse.h"
+#include "perturbation.h"
+
+// Direct double-precision reference (no periodicity), matching the escape
+// semantics of the core loops: z_0 = 0; the iteration index where |z_k|^2 > 4
+// first holds is returned (0 = never escaped within maxiter).
+static int directIter(double cx, double cy, int maxiter)
+{
+    double zx = 0.0, zy = 0.0;
+    for (int k = 0; k < maxiter; k++) {
+        if (zx*zx + zy*zy > 4.0) return k;
+        double nx = zx*zx - zy*zy + cx;
+        double ny = 2.0*zx*zy + cy;
+        zx = nx; zy = ny;
+    }
+    return 0;
+}
 
 int main()
 {
@@ -111,6 +127,34 @@ int main()
     printf("  float-AVX  (8-wide) : %.1f ms  (%.2fx)\n", ms_f, ms_d/ms_f);
     (void)sink;
 
+    // ---- perturbation vs direct double, at a moderate (double-valid) zoom ----
+    // Both must agree where double precision is still fine; this validates the
+    // perturbation recurrence + rebasing independently of the deep-zoom regime.
+    const int PW = 256, PH = 256, PMAX = 1000;
+    const double pcx = -0.743643887, pcy = 0.131825904;
+    const double pwidth = 3e-3, pheight = pwidth * (double)PH / PW;
+    unsigned char *pbuf = (unsigned char*)malloc(PW * PH);
+    mandelPerturbation(pcx, pcy, pwidth, pheight, pbuf, PW, PH, PMAX);
+
+    const double pstepx = pwidth / PW,  pstepy = pheight / PH;
+    const double pcx0 = -0.5*(PW-1)*pstepx, pcy0 = 0.5*(PH-1)*pstepy;
+    long ptotal = 0, mm_pert = 0; int max_pert = 0;
+    for (int py = 0; py < PH; py++) {
+        for (int px = 0; px < PW; px++) {
+            double c_re = pcx + (pcx0 + px*pstepx);
+            double c_im = pcy + (pcy0 - py*pstepy);
+            int ref = directIter(c_re, c_im, PMAX) & 0xFF;
+            int got = pbuf[py*PW + px];
+            int e = abs(got - ref);
+            ptotal++;
+            if (e) mm_pert++;
+            if (e > max_pert) max_pert = e;
+        }
+    }
+    free(pbuf);
+    printf("PERTURB vs direct double: mismatches=%ld (%.3f%%) maxdiff=%d\n",
+           mm_pert, 100.0 * mm_pert / ptotal, max_pert);
+
     // ---- pass/fail bounds (catch a broken SIMD core loop) ----
     // The SIMD loops differ from scalar only at the chaotic boundary, due to
     // the periodicity approximation and (for float) reduced precision. A real
@@ -122,6 +166,8 @@ int main()
     if (p_avx_def > 0.1) { printf("FAIL: AVX vs scalar %.3f%% > 0.1%%\n", p_avx_def); rc = 1; }
     if (p_avx_sse > 0.5) { printf("FAIL: AVX vs SSE %.3f%% > 0.5%%\n", p_avx_sse); rc = 1; }
     if (p_flt     > 1.0) { printf("FAIL: FLOAT vs scalar %.3f%% > 1.0%%\n", p_flt); rc = 1; }
+    double p_pert = 100.0 * mm_pert / ptotal;
+    if (p_pert    > 1.0) { printf("FAIL: PERTURB vs double %.3f%% > 1.0%%\n", p_pert); rc = 1; }
     printf(rc ? "RESULT: FAIL\n" : "RESULT: PASS\n");
     return rc;
 }

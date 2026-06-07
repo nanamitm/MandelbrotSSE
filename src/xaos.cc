@@ -4,6 +4,7 @@
 #include "common.h"
 #include "xaos.h"
 #include "sse.h"
+#include "perturbation.h"
 
 // Beyond this, things get shaky...
 #define ZOOM_LIMIT 1e295*MAXX*DBL_MIN
@@ -265,21 +266,8 @@ void mandel(
             }
         }
     }
-    // Translate the 8-bit index buffer straight into the streaming
-    // texture (index -> ARGB8888 via the lookup table), then present.
-    // This reuses one texture instead of allocating one per frame.
-    void *texPixels;
-    int texPitch;
-    SDL_LockTexture(streamTexture, NULL, &texPixels, &texPitch);
-    for (int i=0; i<MAXY; i++) {
-        Uint32 *dst = (Uint32*)((Uint8*)texPixels + i*texPitch);
-        const Uint8 *src = &bufferMem[bufIdx][i*MAXX];
-        for (int j=0; j<MAXX; j++)
-            dst[j] = paletteLUT[src[j]];
-    }
-    SDL_UnlockTexture(streamTexture);
-    SDL_RenderCopy(renderer, streamTexture, NULL, NULL);
-    SDL_RenderPresent(renderer);
+    // Translate the 8-bit index buffer into the streaming texture and present.
+    presentIndexBuffer(bufferMem[bufIdx]);
 }
 
 AUTO_DISPATCH
@@ -418,5 +406,67 @@ double mousedriven(double percent)
     // Inform point reached, for potential autopilot target
     printf("[-] Rendered  : %d frames\n", frames);
     return ((double)frames)*1000.0/ticks;
+}
+
+// Deep-zoom autopilot. Unlike the normal autopilot (which stops at ZOOM_LIMIT,
+// where double precision runs out), this keeps going far deeper by rendering
+// each frame with the perturbation algorithm. The window is tracked as a
+// center plus a (shrinking) width, never as xld/xru, so it never suffers the
+// catastrophic cancellation that breaks the double-precision path.
+double deepAutopilot(bool benchmark)
+{
+    // Well-known points with rich, deep structure. Double precision is enough
+    // to *name* the point; we then zoom into that exact point far past where
+    // ordinary double rendering would turn to mush.
+    static double deep_points[][2] = {
+        {-0.7436438870371587,  0.13182590420531197},  // seahorse valley
+        {-0.74364409961490197, 0.13182604688481990},  // nearby spiral
+        {-0.10109636384562218, 0.95628651080914582},  // "scepter" valley
+        { 0.42884026803526225, 0.23139131125325058},  // double-spiral
+    };
+    const int N = sizeof(deep_points)/sizeof(deep_points[0]);
+    int idx = benchmark ? 0 : (rand() % N);
+
+    Uint8 *buf = new Uint8[MAXX*MAXY];
+    if (!buf) panic("Out of memory");
+
+    const double aspect = (double)MAXY / MAXX;
+    const double DEEP_LIMIT = 1e-22;   // far beyond the ~1e-13 double-precision wall
+
+    int frames = 0;
+    unsigned long ticks = 0;
+    double width = 3.0;
+    double cx = deep_points[idx][0], cy = deep_points[idx][1];
+
+    while (1) {
+        unsigned st = SDL_GetTicks();
+        mandelPerturbation(cx, cy, width, width*aspect, buf, MAXX, MAXY, iterations);
+        presentIndexBuffer(buf);
+        unsigned en = SDL_GetTicks();
+        ticks += en - st;
+        frames++;
+
+        if (en - st < minimum_ms_per_frame)
+            SDL_Delay(minimum_ms_per_frame - en + st);
+
+        int x, y;
+        if (kbhit(&x, &y) == SDL_QUIT)
+            break;
+
+        width *= 0.97;                 // zoom in a little each frame
+        if (width < DEEP_LIMIT) {
+            if (benchmark)
+                break;
+            // Reached the bottom - pick the next location and zoom back out.
+            width = 3.0;
+            idx = (idx + 1) % N;
+            cx = deep_points[idx][0];
+            cy = deep_points[idx][1];
+        }
+    }
+
+    delete[] buf;
+    printf("[-] Rendered  : %d frames\n", frames);
+    return ticks ? ((double)frames)*1000.0/ticks : 0.0;
 }
 

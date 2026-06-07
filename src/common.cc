@@ -106,6 +106,24 @@ void init256colorsMode(const char *windowTitle)
         panic("[x] Couldn't create streaming texture: %s\n", SDL_GetError());
 }
 
+// Translate an 8-bit index buffer into the persistent streaming texture
+// (index -> ARGB8888 via paletteLUT) and present it.
+void presentIndexBuffer(const Uint8 *buf)
+{
+    void *texPixels;
+    int texPitch;
+    SDL_LockTexture(streamTexture, NULL, &texPixels, &texPitch);
+    for (int i=0; i<MAXY; i++) {
+        Uint32 *dst = (Uint32*)((Uint8*)texPixels + i*texPitch);
+        const Uint8 *src = &buf[i*MAXX];
+        for (int j=0; j<MAXX; j++)
+            dst[j] = paletteLUT[src[j]];
+    }
+    SDL_UnlockTexture(streamTexture);
+    SDL_RenderCopy(renderer, streamTexture, NULL, NULL);
+    SDL_RenderPresent(renderer);
+}
+
 // returns SDL_QUIT if ESC is hit or the user closes the window
 // returns SDL_BUTTON_LEFT if left click (and updates xx and yy with mouse coord)
 // returns SDL_BUTTON_RIGHT if right click (and updates xx and yy with mouse coord)

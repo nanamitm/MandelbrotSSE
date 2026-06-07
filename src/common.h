@@ -56,4 +56,9 @@ int kbhit(int *xx, int *yy);
 // Creates the window and sets up the palette of colors.
 void init256colorsMode(const char *windowTitle);
 
+// Translate an 8-bit index buffer (MAXX*MAXY) into the streaming texture via
+// paletteLUT and present it. Shared by the XaoS renderer and the deep-zoom
+// perturbation renderer.
+void presentIndexBuffer(const Uint8 *buf);
+
 #endif
