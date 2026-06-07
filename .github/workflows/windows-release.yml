@@ -1,0 +1,82 @@
+name: Windows release
+
+# Builds a portable Windows (MinGW-w64) package of mandelSSE.
+# - On every push/PR to master: build + test, upload the package as an artifact.
+# - On a version tag (v*): also publish a GitHub Release with the .zip attached.
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases on tag pushes
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2 / MinGW-w64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            zip
+
+      - name: Configure
+        # ENABLE_NATIVE=OFF -> portable binary (still picks AVX2/AVX/SSE at
+        # runtime via __builtin_cpu_supports, just not tuned for the runner CPU).
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_NATIVE=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME//\//-}"        # tag name, or branch (slashes -> -)
+          DIST="mandelSSE-win64-${VER}"
+          mkdir -p "$DIST"
+          cp build/mandelSSE.exe "$DIST"/
+          # Bundle every MinGW runtime DLL the binary needs (incl. SDL2.dll).
+          for dll in $(ldd build/mandelSSE.exe | awk '/mingw64/ {print $3}'); do
+            cp "$dll" "$DIST"/
+          done
+          cp README.md COPYING "$DIST"/ 2>/dev/null || true
+          # Convenience launchers (CRLF line endings for Windows).
+          printf '@echo off\r\nmandelSSE.exe %%*\r\n'        > "$DIST/autopilot.bat"
+          printf '@echo off\r\nmandelSSE.exe -m 1280 720\r\n' > "$DIST/mouse.bat"
+          printf '@echo off\r\nmandelSSE.exe -D\r\n'          > "$DIST/deepzoom.bat"
+          zip -r "${DIST}.zip" "$DIST"
+          {
+            echo "ASSET=${DIST}.zip"
+            echo "DISTDIR=${DIST}"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mandelSSE-win64
+          path: ${{ env.DISTDIR }}
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          generate_release_notes: true

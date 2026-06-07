@@ -29,7 +29,7 @@
 
 void usage(char *argv[])
 {
-    printf("Usage: %s [-a|-m] [-h] [-b] "
+    printf("Usage: %s [-a|-m] [-h] [-b] [-D] "
 #ifdef __x86_64__
            "[-v|-s|-d] "
 #endif
