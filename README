@@ -39,24 +39,31 @@ Usage
 
 You can then try these:
 
-    $ src/mandelSSE
+    $ build/mandelSSE
     (Runs in autopilot mode, in a 1024x768 window)
 
-    $ src/mandelSSE -m 1280 720
+    $ build/mandelSSE -m 1280 720
     (Runs in mouse-driven mode, in a 1280x720 window)
     (left-click/hold zooms-in, right-click/hold zooms out)
+
+    $ build/mandelSSE -D
+    (Deep-zoom autopilot - zooms far past the double-precision limit)
+
+    $ build/mandelSSE -D -m
+    (Interactive deep zoom; left/right click to zoom, release for a crisp frame)
 
 Option `-h` gives you additional information about how to control
 the Mandelbrot zoomer:
 
-    $ ./src/mandelSSE -h
+    $ ./build/mandelSSE -h
 
-    Usage: ./src/mandelSSE [-a|-m] [-h] [-b] [-v|-s|-d] [-i iter] [-p pct] [-f rate] [WIDTH HEIGHT]
+    Usage: ./build/mandelSSE [-a|-m] [-h] [-b] [-D] [-v|-s|-d] [-i iter] [-p pct] [-f rate] [WIDTH HEIGHT]
     Where:
             -h      Show this help message
             -m      Run in mouse-driven mode
             -a      Run in autopilot mode (default)
             -b      Run in benchmark mode (implies autopilot)
+            -D      Deep-zoom (perturbation; zooms past the double-precision limit)
             -v      Force use of AVX
             -s      Force use of SSE
             -d      Force use of non-AVX, non-SSE code
@@ -71,7 +78,7 @@ the Mandelbrot zoomer:
 For ultimate rendering speed, you can disable the frame limiter (option `-f`).
 By default, you are limited to 60fps:
 
-    $ src/mandelSSE -m -f 0 1280 720
+    $ build/mandelSSE -m -f 0 1280 720
 
 The benchmarking mode (-b) does this automatically.
 If you want to benchmark your CPU only (and not display anything)

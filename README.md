@@ -67,24 +67,31 @@ Usage
 
 You can then try these:
 
-    $ src/mandelSSE
+    $ build/mandelSSE
     (Runs in autopilot mode, in a 1024x768 window)
 
-    $ src/mandelSSE -m 1280 720
+    $ build/mandelSSE -m 1280 720
     (Runs in mouse-driven mode, in a 1280x720 window)
     (left-click/hold zooms-in, right-click/hold zooms out)
+
+    $ build/mandelSSE -D
+    (Deep-zoom autopilot - zooms far past the double-precision limit; see below)
+
+    $ build/mandelSSE -D -m
+    (Interactive deep zoom; left/right click to zoom, release to get a crisp frame)
 
 Option `-h` gives you additional information about how to control
 the Mandelbrot zoomer:
 
-    $ ./src/mandelSSE -h
+    $ ./build/mandelSSE -h
 
-    Usage: ./src/mandelSSE [-a|-m] [-h] [-b] [-v|-s|-d] [-i iter] [-p pct] [-f rate] [WIDTH HEIGHT]
+    Usage: ./build/mandelSSE [-a|-m] [-h] [-b] [-D] [-v|-s|-d] [-i iter] [-p pct] [-f rate] [WIDTH HEIGHT]
     Where:
             -h      Show this help message
             -m      Run in mouse-driven mode
             -a      Run in autopilot mode (default)
             -b      Run in benchmark mode (implies autopilot)
+            -D      Deep-zoom (perturbation; zooms past the double-precision limit)
             -v      Force use of AVX
             -s      Force use of SSE
             -d      Force use of non-AVX, non-SSE code
@@ -99,7 +106,7 @@ the Mandelbrot zoomer:
 For ultimate rendering speed, you can disable the frame limiter (option `-f`).
 By default, you are limited to 60fps:
 
-    $ src/mandelSSE -m -f 0 1280 720
+    $ build/mandelSSE -m -f 0 1280 720
 
 The benchmarking mode (-b) does this automatically.
 If you want to benchmark your CPU only (and not display anything)
@@ -263,6 +270,33 @@ stops zoooming.
 
 The code has a lot of comments explaining the inner-workings in detail.
 Have a look!
+
+Deep zoom (perturbation)
+------------------------
+
+Ordinary double precision runs out at a window width of around 1e-13: the
+coordinates of neighbouring pixels can no longer be told apart, and the
+normal renderer deliberately stops there. The `-D` mode goes far deeper
+using perturbation theory.
+
+The idea: pick the frame center `c0` as a reference and compute its orbit
+`Z_n` once, in high precision. Every other pixel `c = c0 + dc` is then
+iterated as a small delta in ordinary doubles:
+
+    d_{n+1} = 2*Z_n*d_n + d_n^2 + dc
+
+and the escape test uses `|z_n| = |Z_n + d_n|`. Only the reference orbit
+needs high precision; here it is computed in double-double arithmetic
+(~31 digits, see `src/dd.h`), which lifts the limit to roughly 1e-26.
+"Zhuoran rebasing" keeps the delta well-scaled and avoids the classic
+perturbation glitches. See `src/perturbation.cc`.
+
+The window is tracked as a center plus a shrinking width (never as
+`xld`/`xru`), so it never hits the catastrophic cancellation that breaks
+the double-precision path. The renderer is parallelised with OpenMP and
+has an AVX2+FMA path that does 4 pixels at a time. `-D -m` gives you an
+interactive deep zoom that holds a full-quality frame when idle - handy
+for screenshots.
 
 Cross compiling for Windows via MinGW
 -------------------------------------
