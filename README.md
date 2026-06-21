@@ -15,13 +15,16 @@ COMPILE/INSTALL/RUN
 
 Windows
 -------
-Windows users can download and run a pre-compiled Windows binary
-[here](https://github.com/ttsiodras/MandelbrotSSE/releases/download/2.11/mandelSSE-win32-2.11.zip).
+Windows users can download and run a pre-compiled (64-bit) Windows binary
+from this fork's [Releases page](https://github.com/nanamitm/MandelbrotSSE/releases) —
+a `mandelSSE-win64-*.zip` is built and attached automatically by
+[GitHub Actions](.github/workflows/windows-release.yml) on every tagged release.
 
-After decompressing, you can simply execute either one of the two .bat
-files. The 'autopilot' one zooms in a specific location, while the other
-one allows you to zoom interactively using your mouse (left-click/hold zooms in,
-right-click/hold zooms out).
+After decompressing, you can simply execute one of the three .bat files:
+`autopilot.bat` zooms in a specific location, `mouse.bat` lets you zoom
+interactively with your mouse (left-click/hold zooms in, right-click/hold
+zooms out), and `deepzoom.bat` runs the perturbation-based deep zoom (`-D`,
+see below) in autopilot mode.
 
 If you want to build from source natively on Windows, install
 [MSYS2](https://www.msys2.org/) and, from its MINGW64 shell, run:
@@ -317,8 +320,9 @@ Then point CMake at the MinGW toolchain with `-DCMAKE_TOOLCHAIN_FILE`
 
 Then copy `build-win/mandelSSE.exe` together with `SDL2.dll` (and the
 MinGW runtime DLLs for OpenMP / libstdc++) to your Windows machine.
-You can also get those "ingredients" from the packaged release
-[here](https://github.com/ttsiodras/MandelbrotSSE/releases/download/2.11/mandelSSE-win32-2.11.zip).
+You can also get those "ingredients" from this fork's packaged
+[Windows release](https://github.com/nanamitm/MandelbrotSSE/releases) (see
+above).
 
 MISC
 ====
